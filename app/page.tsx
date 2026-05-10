@@ -369,7 +369,7 @@ export default function SambungCepat() {
     setCurrentScreen("LOBBY");
   };
 
-  const springTransition = { type: "spring", stiffness: 100, damping: 10 };
+  const springTransition = { type: "spring" as const, stiffness: 100, damping: 10 };
 
   const standardShellClass = "flex-1 w-full max-w-md md:max-w-2xl lg:max-w-4xl mx-auto flex flex-col p-4 md:p-8 min-h-0 relative overflow-hidden";
 
