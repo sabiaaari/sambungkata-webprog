@@ -28,13 +28,14 @@ interface WinnerData {
 }
 
 interface GamePayload {
-  screenState?: ScreenState;
+  currentScreen?: ScreenState;
   currentPhrase?: string;
   ropePosition?: number;
   currentTurn?: Turn;
   timeLeft?: number;
   actionPlayer?: string;
   winnerData?: WinnerData;
+  usedPhrases?: string[];
 }
 
 /**
@@ -46,7 +47,7 @@ const Cloud = ({ className }: { className?: string }) => (
 
 export default function SambungCepat() {
   // 1. ALL STATES & REFS (AT THE TOP)
-  const [screenState, setScreenState] = useState<ScreenState>("HOME");
+  const [currentScreen, setCurrentScreen] = useState<ScreenState>("HOME");
   const [playerName, setPlayerName] = useState("");
   const [roomCode, setRoomCode] = useState("");
   const [isHost, setIsHost] = useState(false);
@@ -64,8 +65,12 @@ export default function SambungCepat() {
     turns: 0 
   });
   const [winnerData, setWinnerData] = useState<WinnerData | null>(null);
+  const [usedPhrases, setUsedPhrases] = useState<string[]>(["meja makan"]);
+  const [isYourTurn, setIsYourTurn] = useState(false);
 
   const [isMuted, setIsMuted] = useState(false);
+  const [warning, setWarning] = useState("");
+  const [shouldShake, setShouldShake] = useState(false);
   const bgmRef = useRef<HTMLAudioElement | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -74,7 +79,7 @@ export default function SambungCepat() {
   const playClickSound = useCallback(() => {
     if (isMuted) return;
     const clickAudio = new Audio('/sounds/click.ogg');
-    clickAudio.play().catch(() => {}); // Catch autoplay errors
+    clickAudio.play().catch(() => {}); 
   }, [isMuted]);
 
   const startBGM = useCallback(() => {
@@ -110,13 +115,72 @@ export default function SambungCepat() {
     }
   }, [isConnected]);
 
-  // 3. DEV TOOL: Handle screen jumping
+  // 4. DATA SYNC HELPER (FOR WEBSOCKETS)
+  const syncStateWithServer = useCallback((serverPayload: { newWord: string, ropePos: number, isMyTurn: boolean, lastPlayerName: string }) => {
+    setCurrentPhrase(serverPayload.newWord);
+    setRopePosition(serverPayload.ropePos);
+    setIsYourTurn(serverPayload.isMyTurn);
+    setUsedPhrases((prev) => [...prev, serverPayload.newWord.toLowerCase()]);
+
+    // Suara untuk pergerakan lawan
+    playClickSound();
+  }, [playClickSound]);
+
+  useEffect(() => {
+    // =================================================================
+    // 🚀 TODO TEAM 3 (WEBSOCKETS): AREA INTEGRASI SOCKET.IO / PUSHER
+    // =================================================================
+    // 1. Inisialisasi koneksi socket di sini.
+    // 2. Dengarkan event dari server (misal: socket.on('updateGameState', ...))
+    // 3. Saat data masuk, panggil fungsi pengumpan UI di bawah ini:
+    //
+    // syncStateWithServer({
+    //   newWord: data.word,
+    //   ropePos: data.position,
+    //   isMyTurn: data.nextTurn === myPlayerId,
+    //   lastPlayerName: data.playerName
+    // });
+    // =================================================================
+  }, [syncStateWithServer]);
+
+  // ERROR TRIGGER (SHAKE + WARNING)
+  const triggerError = (msg: string) => {
+    setWarning(msg);
+    setShouldShake(true);
+    // Hentikan getar setelah 500ms
+    setTimeout(() => {
+      setShouldShake(false);
+    }, 500);
+    // Hapus teks peringatan setelah 2 detik
+    setTimeout(() => {
+      setWarning("");
+    }, 2000);
+  };
+
+  // 4. LOGIC: Handle Main Lagi (Reset State)
+  const handleMainLagi = () => {
+    playClickSound();
+    // Reset State Permainan
+    setRopePosition(0);
+    setCurrentPhrase("Meja Makan");
+    setUsedPhrases(["meja makan"]);
+    setStats({ totalCorrect: 0, totalTime: 0, turns: 0 });
+    setWinnerData(null);
+    setWarning("");
+    setInputValue("");
+    setTimeLeft(10);
+    setCurrentTurn("P1");
+    // Pindah ke Home
+    setCurrentScreen("HOME");
+  };
+
+  // 5. DEV TOOL: Handle screen jumping
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const screenParam = params.get("screen");
 
     if (screenParam === "LOBBY" || screenParam === "ARENA" || screenParam === "RESULT") {
-      setScreenState(screenParam as ScreenState);
+      setCurrentScreen(screenParam as ScreenState);
       setPlayerName("TESTER");
       setRoomCode("DEV123");
       setIsHost(true);
@@ -131,9 +195,9 @@ export default function SambungCepat() {
     }
   }, []);
 
-  // 4. SUPABASE CONNECTION EFFECT
+  // 6. SUPABASE CONNECTION EFFECT
   useEffect(() => {
-    if (!roomCode || screenState === "HOME" || !supabase) {
+    if (!roomCode || currentScreen === "HOME" || !supabase) {
       return;
     }
 
@@ -146,12 +210,13 @@ export default function SambungCepat() {
 
     channel
       .on("broadcast", { event: "game_update" }, ({ payload }: { payload: GamePayload }) => {
-        if (payload.screenState) setScreenState(payload.screenState);
+        if (payload.currentScreen) setCurrentScreen(payload.currentScreen);
         if (payload.currentPhrase) setCurrentPhrase(payload.currentPhrase);
         if (payload.ropePosition !== undefined) setRopePosition(payload.ropePosition);
         if (payload.currentTurn) setCurrentTurn(payload.currentTurn);
         if (payload.timeLeft !== undefined) setTimeLeft(payload.timeLeft);
         if (payload.winnerData) setWinnerData(payload.winnerData);
+        if (payload.usedPhrases) setUsedPhrases(payload.usedPhrases);
       })
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
@@ -167,18 +232,20 @@ export default function SambungCepat() {
       channel.unsubscribe();
       setIsConnected(false);
     };
-  }, [roomCode, screenState]);
+  }, [roomCode, currentScreen]);
 
-  // 5. GAME LOGIC FUNCTIONS
+  // 7. GAME LOGIC FUNCTIONS
   const handleStartGame = () => {
     if (!isHost) return;
     setStats({ totalCorrect: 0, totalTime: 0, turns: 0 });
+    setUsedPhrases(["meja makan"]);
     broadcastUpdate({
-      screenState: "ARENA",
+      currentScreen: "ARENA",
       timeLeft: 10,
       currentPhrase: "Meja Makan",
       ropePosition: 0,
       currentTurn: "P1",
+      usedPhrases: ["meja makan"],
     });
   };
 
@@ -188,29 +255,51 @@ export default function SambungCepat() {
       const winName = winner === "P1" ? (isHost ? playerName : "Lawan") : (!isHost ? playerName : "Lawan");
       const avg = stats.turns > 0 ? (stats.totalTime / stats.turns).toFixed(1) : "0";
       
-      broadcastUpdate({
-        screenState: "RESULT",
-        winnerData: {
-          name: winName,
-          score: stats.totalCorrect,
-          avgTime: avg
-        }
-      });
+      // TUNGGU 1 DETIK SEBELUM KE RESULT
+      setTimeout(() => {
+        broadcastUpdate({
+          currentScreen: "RESULT",
+          winnerData: {
+            name: winName,
+            score: stats.totalCorrect,
+            avgTime: avg
+          }
+        });
+      }, 1000);
     }
   };
 
   const handleKirim = () => {
-    const trimmedInput = inputValue.trim();
-    if (!trimmedInput) return;
+    // 1. Normalisasi String
+    const normalizedInput = inputValue.trim().replace(/\s+/g, ' ');
+    if (!normalizedInput) return;
 
-    const phrases = currentPhrase.split(" ");
-    const lastWordOfCurrent = phrases[phrases.length - 1].toLowerCase();
-    const inputWords = trimmedInput.split(" ");
-    const firstWordOfInput = inputWords[0].toLowerCase();
+    const lowerInput = normalizedInput.toLowerCase();
+    const lowerCurrent = currentPhrase.toLowerCase();
 
-    if (firstWordOfInput === lastWordOfCurrent) {
+    // 2. Cek Duplikasi (History)
+    if (usedPhrases.includes(lowerInput)) {
+      triggerError("Frasa ini sudah pernah digunakan! Cari kombinasi lain.");
+      return;
+    }
+
+    // 3. Pecah frasa saat ini dan input menjadi array
+    const currentWords = lowerCurrent.split(' ');
+    const inputWords = lowerInput.split(' ');
+
+    // 4. Validasi: Tepat 2 kata
+    if (inputWords.length !== 2) {
+      triggerError("Masukkan tepat 2 kata!");
+      return;
+    }
+
+    // 5. Validasi: Kata pertama input harus sama dengan kata kedua frasa saat ini
+    if (inputWords[0] === currentWords[1]) {
+      setWarning("");
+      playClickSound();
+      
       const nextTurn: Turn = currentTurn === "P1" ? "P2" : "P1";
-      const moveDirection = currentTurn === "P1" ? -20 : 20;
+      const moveDirection = currentTurn === "P1" ? -10 : 10;
       const newPos = Math.max(-100, Math.min(100, ropePosition + moveDirection));
 
       const timeUsed = 10 - timeLeft;
@@ -220,26 +309,30 @@ export default function SambungCepat() {
         turns: prev.turns + 1
       }));
 
+      const newUsedPhrases = [...usedPhrases, lowerInput];
+      setUsedPhrases(newUsedPhrases);
+
       broadcastUpdate({
-        currentPhrase: trimmedInput,
+        currentPhrase: normalizedInput,
         ropePosition: newPos,
         currentTurn: nextTurn,
         timeLeft: 10,
+        usedPhrases: newUsedPhrases,
       });
       setInputValue("");
       checkWinner(newPos);
     } else {
-      alert(`Oops! Harus mulai dengan kata "${lastWordOfCurrent.toUpperCase()}" ya!`);
+      triggerError(`Kata pertama harus "${currentWords[1].toUpperCase()}"!`);
     }
   };
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    if (screenState === "ARENA" && timeLeft > 0) {
+    if (currentScreen === "ARENA" && timeLeft > 0) {
       timer = setInterval(() => {
         setTimeLeft((prev) => prev - 1);
       }, 1000);
-    } else if (timeLeft === 0 && screenState === "ARENA") {
+    } else if (timeLeft === 0 && currentScreen === "ARENA") {
       const myPlayerRole: Turn = isHost ? "P1" : "P2";
       if (currentTurn === myPlayerRole) {
         const nextTurn: Turn = currentTurn === "P1" ? "P2" : "P1";
@@ -252,7 +345,7 @@ export default function SambungCepat() {
       }
     }
     return () => clearInterval(timer);
-  }, [screenState, timeLeft, currentTurn, isHost, ropePosition, broadcastUpdate]);
+  }, [currentScreen, timeLeft, currentTurn, isHost, ropePosition, broadcastUpdate]);
 
   const isMyTurn = (isHost && currentTurn === "P1") || (!isHost && currentTurn === "P2");
 
@@ -267,13 +360,13 @@ export default function SambungCepat() {
     const code = Math.random().toString(36).substring(2, 6).toUpperCase();
     setIsHost(true);
     setRoomCode(code);
-    setScreenState("LOBBY");
+    setCurrentScreen("LOBBY");
   };
 
   const handleJoinRoom = () => {
     if (!playerName.trim() || !roomCode) return;
     setIsHost(false);
-    setScreenState("LOBBY");
+    setCurrentScreen("LOBBY");
   };
 
   const springTransition = { type: "spring", stiffness: 100, damping: 10 };
@@ -299,7 +392,7 @@ export default function SambungCepat() {
 
       <AnimatePresence mode="wait">
         {/* --- SCREEN: HOME --- */}
-        {screenState === "HOME" && (
+        {currentScreen === "HOME" && (
           <motion.div 
             key="home" 
             initial={{ opacity: 0, scale: 0.9 }} 
@@ -367,14 +460,14 @@ export default function SambungCepat() {
                   <div className="flex items-start gap-4 mb-4">
                     <div className="shrink-0 w-8 h-8 rounded-full bg-sky-400 flex items-center justify-center text-white font-bold shadow-sm text-sm">🔤</div>
                     <p className="text-sm md:text-base text-slate-700 font-medium leading-relaxed">
-                      Ketik kata yang berawalan dari huruf terakhir kata sebelumnya.
+                      Sambung <b>kata terakhir</b> lawan menjadi <b>kata pertama</b> di kalimatmu!
                     </p>
                   </div>
 
                   <div className="flex items-start gap-4 mb-4">
                     <div className="shrink-0 w-8 h-8 rounded-full bg-yellow-400 flex items-center justify-center text-white font-bold shadow-sm text-sm">⚡</div>
                     <p className="text-sm md:text-base text-slate-700 font-medium leading-relaxed">
-                      Jawaban yang benar dan cepat akan menarik tali tambang ke arahmu!
+                      Contoh: MEJA <b>MAKAN</b> ➡️ <b>MAKAN</b> MALAM. (Minimal 2 kata).
                     </p>
                   </div>
 
@@ -401,7 +494,7 @@ export default function SambungCepat() {
         )}
 
         {/* --- SCREEN: LOBBY --- */}
-        {screenState === "LOBBY" && (
+        {currentScreen === "LOBBY" && (
           <motion.div 
             key="lobby" 
             initial={{ opacity: 0, y: 50 }} 
@@ -450,13 +543,21 @@ export default function SambungCepat() {
                     <p className="font-black text-sm text-blue-600 uppercase">Menunggu Host...</p>
                   </div>
                 )}
+
+                {/* TOMBOL SIMULASI (Mockup Only) */}
+                <button 
+                  onClick={() => { playClickSound(); setCurrentScreen("ARENA"); }}
+                  className="mt-4 text-[10px] font-bold text-blue-300 hover:text-blue-500 transition-colors uppercase tracking-widest"
+                >
+                  SIMULASI MULAI MAIN
+                </button>
               </div>
             </div>
           </motion.div>
         )}
 
         {/* --- SCREEN: ARENA --- */}
-        {screenState === "ARENA" && (
+        {currentScreen === "ARENA" && (
           <motion.div 
             key="arena" 
             initial={{ opacity: 0 }} 
@@ -500,14 +601,27 @@ export default function SambungCepat() {
             {/* 3. BOTTOM PART: REFINED BADGE & INPUT (shrink-0) */}
             <footer className="w-full max-w-xl mx-auto flex flex-col items-center mt-auto shrink-0 pb-6 px-2 relative z-30">
               <AnimatePresence mode="wait">
-                <motion.div 
-                  key={isMyTurn ? "my-turn" : "waiting"}
-                  initial={{ y: 10, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  className={`py-1.5 px-6 rounded-full text-sm font-black uppercase tracking-widest shadow-md mb-3 z-10 border-b-2 ${isMyTurn ? "bg-[#10b981] text-slate-900 border-green-700/30 animate-bounce" : "bg-white text-slate-400 border-slate-200"}`}
-                >
-                  {isMyTurn ? "GILIRAN KAMU!" : "TUNGGU LAWAN..."}
-                </motion.div>
+                {warning ? (
+                  <motion.div 
+                    key="warning"
+                    initial={{ y: 10, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    exit={{ y: -10, opacity: 0 }}
+                    className="py-1.5 px-6 rounded-full text-sm font-black uppercase tracking-widest shadow-md mb-3 z-10 border-b-2 bg-red-500 text-white border-red-700"
+                  >
+                    {warning}
+                  </motion.div>
+                ) : (
+                  <motion.div 
+                    key={isMyTurn ? "my-turn" : "waiting"}
+                    initial={{ y: 10, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    exit={{ y: -10, opacity: 0 }}
+                    className={`py-1.5 px-6 rounded-full text-sm font-black uppercase tracking-widest shadow-md mb-3 z-10 border-b-2 ${isMyTurn ? "bg-[#10b981] text-slate-900 border-green-700/30 animate-bounce" : "bg-white text-slate-400 border-slate-200"}`}
+                  >
+                    {isMyTurn ? "GILIRAN KAMU!" : "TUNGGU LAWAN..."}
+                  </motion.div>
+                )}
               </AnimatePresence>
 
               <div className="w-full bg-white p-2 md:p-3 rounded-[2rem] md:rounded-[2.5rem] shadow-2xl flex flex-col md:flex-row items-center gap-2 md:gap-3 relative z-0 border-b-4 border-slate-200">
@@ -520,7 +634,7 @@ export default function SambungCepat() {
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && (playClickSound(), handleKirim())}
-                  className="flex-1 w-full px-5 py-3 md:py-4 bg-sky-50/50 rounded-xl md:rounded-2xl text-lg md:text-xl font-black outline-none border-2 border-transparent focus:border-blue-400 transition-all uppercase disabled:bg-slate-50 placeholder:text-slate-300"
+                  className={`flex-1 w-full px-5 py-3 md:py-4 bg-sky-50/50 rounded-xl md:rounded-2xl text-lg md:text-xl font-black outline-none border-2 transition-all uppercase disabled:bg-slate-50 placeholder:text-slate-300 ${shouldShake ? 'animate-shake' : 'border-transparent focus:border-blue-400'}`}
                 />
                 <button 
                   disabled={!isMyTurn}
@@ -535,7 +649,7 @@ export default function SambungCepat() {
         )}
 
         {/* --- SCREEN: RESULT --- */}
-        {screenState === "RESULT" && winnerData && (
+        {currentScreen === "RESULT" && winnerData && (
           <motion.div 
             key="result" 
             initial={{ opacity: 0, scale: 0.9 }} 
@@ -574,7 +688,7 @@ export default function SambungCepat() {
                 </div>
 
                 <button 
-                  onClick={() => { playClickSound(); setScreenState("HOME"); }}
+                  onClick={handleMainLagi}
                   className="w-full bg-emerald-500 border-b-8 border-emerald-700 active:border-b-0 active:translate-y-2 text-white font-black py-4 md:py-5 rounded-2xl md:rounded-3xl text-xl md:text-2xl uppercase shadow-lg shrink-0"
                 >
                   Main Lagi!
