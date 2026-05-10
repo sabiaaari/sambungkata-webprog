@@ -65,10 +65,41 @@ export default function SambungCepat() {
   });
   const [winnerData, setWinnerData] = useState<WinnerData | null>(null);
 
+  const [isMuted, setIsMuted] = useState(false);
+  const bgmRef = useRef<HTMLAudioElement | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // 2. BROADCAST HELPER
+  // 2. AUDIO FUNCTIONS
+  const playClickSound = useCallback(() => {
+    if (isMuted) return;
+    const clickAudio = new Audio('/sounds/click.ogg');
+    clickAudio.play().catch(() => {}); // Catch autoplay errors
+  }, [isMuted]);
+
+  const startBGM = useCallback(() => {
+    if (!bgmRef.current) {
+      const clickAudio = new Audio('/sounds/bgm.mp3');
+      clickAudio.loop = true;
+      clickAudio.volume = 0.3;
+      bgmRef.current = clickAudio;
+    }
+    if (!isMuted) {
+      bgmRef.current.play().catch(() => {});
+    }
+  }, [isMuted]);
+
+  useEffect(() => {
+    if (bgmRef.current) {
+      if (isMuted) {
+        bgmRef.current.pause();
+      } else {
+        bgmRef.current.play().catch(() => {});
+      }
+    }
+  }, [isMuted]);
+
+  // 3. BROADCAST HELPER
   const broadcastUpdate = useCallback((payload: GamePayload) => {
     if (channelRef.current && isConnected) {
       channelRef.current.send({
@@ -258,6 +289,14 @@ export default function SambungCepat() {
         <Cloud className="w-48 h-24 md:w-96 md:h-48 top-1/2 right-1/4" />
       </div>
 
+      {/* AUDIO TOGGLE BUTTON */}
+      <button 
+        onClick={() => { setIsMuted(!isMuted); playClickSound(); startBGM(); }}
+        className="fixed top-4 right-4 z-50 bg-white/80 backdrop-blur-sm w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-2xl border-2 border-sky-100 hover:scale-110 active:scale-95 transition-all"
+      >
+        {isMuted ? "🔇" : "🔊"}
+      </button>
+
       <AnimatePresence mode="wait">
         {/* --- SCREEN: HOME --- */}
         {screenState === "HOME" && (
@@ -267,10 +306,10 @@ export default function SambungCepat() {
             animate={{ opacity: 1, scale: 1 }} 
             exit={{ opacity: 0, scale: 0.8 }} 
             transition={springTransition}
-            className={standardShellClass}
+            className="w-full h-full overflow-y-auto flex flex-col items-center py-8 px-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
           >
-            <div className="m-auto w-full flex flex-col items-center">
-              <div className="bg-white border-b-8 border-slate-200 p-6 md:p-10 rounded-[2.5rem] md:rounded-[3rem] shadow-2xl w-full max-w-sm md:max-w-md text-center flex flex-col gap-4 md:gap-8 max-h-full overflow-y-auto shrink-0 no-scrollbar">
+            <div className="w-full flex flex-col items-center gap-6">
+              <div className="bg-white border-b-8 border-slate-200 p-6 md:p-10 rounded-[2.5rem] md:rounded-[3rem] shadow-2xl w-full max-w-sm md:max-w-md text-center flex flex-col gap-4 md:gap-8 shrink-0">
                 <motion.h1 
                   animate={{ y: [0, -8, 0] }}
                   transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
@@ -284,13 +323,13 @@ export default function SambungCepat() {
                     type="text" 
                     placeholder="NAMA KAMU..." 
                     value={playerName} 
-                    onChange={(e) => setPlayerName(e.target.value)} 
+                    onChange={(e) => { setPlayerName(e.target.value); startBGM(); }} 
                     className="w-full px-4 py-3 md:px-6 md:py-5 bg-sky-50 rounded-2xl font-black outline-none border-4 border-sky-100 focus:border-yellow-400 transition-all text-center uppercase placeholder:text-blue-300 text-lg md:text-xl shrink-0"
                   />
 
                   <div className="flex flex-col gap-3 md:gap-4 shrink-0">
                     <button 
-                      onClick={handleCreateRoom} 
+                      onClick={() => { playClickSound(); startBGM(); handleCreateRoom(); }} 
                       className="bg-yellow-400 border-b-4 md:border-b-8 border-yellow-600 active:border-b-0 active:translate-y-1 text-yellow-950 font-black py-3 md:py-5 rounded-2xl md:rounded-3xl text-xl md:text-2xl uppercase shadow-md shrink-0"
                     >
                       Buat Ruangan
@@ -301,11 +340,11 @@ export default function SambungCepat() {
                         type="text" 
                         placeholder="KODE" 
                         value={roomCode} 
-                        onChange={(e) => setRoomCode(e.target.value.toUpperCase())} 
+                        onChange={(e) => { setRoomCode(e.target.value.toUpperCase()); startBGM(); }} 
                         className="w-full px-4 py-2 bg-white rounded-xl font-black text-center text-orange-500 outline-none border-2 border-transparent focus:border-orange-400 shrink-0" 
                       />
                       <button 
-                        onClick={handleJoinRoom} 
+                        onClick={() => { playClickSound(); startBGM(); handleJoinRoom(); }} 
                         className="bg-orange-400 border-b-4 border-orange-600 active:border-b-0 active:translate-y-1 text-orange-950 font-black py-2 rounded-xl text-base uppercase shrink-0"
                       >
                         Gabung!
@@ -313,6 +352,49 @@ export default function SambungCepat() {
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {/* KOTAK INFORMASI CARA BERMAIN - GLASSMORPHISM STYLE */}
+              <div className="bg-gradient-to-b from-white/90 to-white/70 backdrop-blur-md border-2 border-white/80 rounded-3xl p-6 shadow-xl w-full max-w-md mx-auto mt-2 mb-8 shrink-0 relative overflow-hidden">
+                <div className="absolute -top-4 -right-4 w-20 h-20 bg-sky-400/10 rounded-full blur-2xl" />
+                <div className="absolute -bottom-4 -left-4 w-16 h-16 bg-yellow-400/10 rounded-full blur-xl" />
+                
+                <h3 className="flex items-center justify-center gap-2 text-xl font-extrabold text-sky-600 mb-5 border-b-2 border-sky-100/50 pb-3">
+                  🎮 CARA BERMAIN
+                </h3>
+                
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-start gap-4 mb-4">
+                    <div className="shrink-0 w-8 h-8 rounded-full bg-sky-400 flex items-center justify-center text-white font-bold shadow-sm text-sm">🔤</div>
+                    <p className="text-sm md:text-base text-slate-700 font-medium leading-relaxed">
+                      Ketik kata yang berawalan dari huruf terakhir kata sebelumnya.
+                    </p>
+                  </div>
+
+                  <div className="flex items-start gap-4 mb-4">
+                    <div className="shrink-0 w-8 h-8 rounded-full bg-yellow-400 flex items-center justify-center text-white font-bold shadow-sm text-sm">⚡</div>
+                    <p className="text-sm md:text-base text-slate-700 font-medium leading-relaxed">
+                      Jawaban yang benar dan cepat akan menarik tali tambang ke arahmu!
+                    </p>
+                  </div>
+
+                  <div className="flex items-start gap-4">
+                    <div className="shrink-0 w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center text-white font-bold shadow-sm text-sm">🏆</div>
+                    <p className="text-sm md:text-base text-slate-700 font-medium leading-relaxed">
+                      Tarik tali sampai ke posisimu untuk memenangkan pertandingan!
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* COPYRIGHT FOOTER */}
+              <div className="mt-auto py-6 text-center shrink-0">
+                <p className="text-[10px] md:text-xs font-bold text-white/60 uppercase tracking-[0.2em]">
+                  &copy; {new Date().getFullYear()} SAMBUNG KATA
+                </p>
+                <p className="text-[10px] md:text-xs font-black text-white/80 uppercase tracking-widest mt-1">
+                  KELOMPOK 22 • AZALIA • SIPA • SYAILA • SIXTA
+                </p>
               </div>
             </div>
           </motion.div>
@@ -358,7 +440,7 @@ export default function SambungCepat() {
                 {isHost ? (
                   <button 
                     disabled={!isConnected}
-                    onClick={handleStartGame} 
+                    onClick={() => { playClickSound(); handleStartGame(); }} 
                     className={`w-full py-4 md:py-6 rounded-2xl md:rounded-3xl font-black uppercase text-xl md:text-2xl border-b-4 md:border-b-8 shadow-lg shrink-0 ${isConnected ? 'bg-yellow-400 text-yellow-950 border-yellow-600 active:border-b-0 active:translate-y-1' : 'bg-slate-200 text-slate-400 border-slate-300 cursor-not-allowed'}`}
                   >
                     GAS MULAI!
@@ -437,12 +519,12 @@ export default function SambungCepat() {
                   placeholder={isMyTurn ? "KETIK DI SINI..." : "SABAR YA..."}
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleKirim()}
+                  onKeyDown={(e) => e.key === "Enter" && (playClickSound(), handleKirim())}
                   className="flex-1 w-full px-5 py-3 md:py-4 bg-sky-50/50 rounded-xl md:rounded-2xl text-lg md:text-xl font-black outline-none border-2 border-transparent focus:border-blue-400 transition-all uppercase disabled:bg-slate-50 placeholder:text-slate-300"
                 />
                 <button 
                   disabled={!isMyTurn}
-                  onClick={handleKirim}
+                  onClick={() => { playClickSound(); handleKirim(); }}
                   className={`w-full md:w-auto px-8 md:px-10 py-3 md:py-4 rounded-xl md:rounded-2xl font-black text-lg md:text-xl uppercase border-b-4 transition-all shadow-md shrink-0 ${isMyTurn ? 'bg-yellow-400 text-yellow-950 border-yellow-600 active:border-b-0 active:translate-y-1' : 'bg-slate-200 text-slate-400 border-slate-300'}`}
                 >
                   KIRIM!
@@ -462,7 +544,7 @@ export default function SambungCepat() {
             className={standardShellClass}
           >
             <div className="m-auto w-full flex flex-col items-center">
-              <div className="bg-white border-b-8 border-slate-200 p-6 md:p-10 rounded-[2.5rem] md:rounded-[3rem] shadow-2xl w-full max-w-sm md:max-w-md text-center flex flex-col gap-4 md:gap-6 max-h-full overflow-y-auto shrink-0 no-scrollbar">
+              <div className="bg-white border-b-8 border-slate-200 p-6 md:p-10 rounded-[2.5rem] md:rounded-[3rem] shadow-2xl w-full max-w-sm md:max-w-md text-center flex flex-col gap-4 md:gap-8 max-h-full overflow-y-auto shrink-0 no-scrollbar">
                 <div className="flex justify-center shrink-0">
                   <motion.div
                     animate={{ scale: [1, 1.2, 1], rotate: [-5, 5, -5] }}
@@ -492,7 +574,7 @@ export default function SambungCepat() {
                 </div>
 
                 <button 
-                  onClick={() => setScreenState("HOME")}
+                  onClick={() => { playClickSound(); setScreenState("HOME"); }}
                   className="w-full bg-emerald-500 border-b-8 border-emerald-700 active:border-b-0 active:translate-y-2 text-white font-black py-4 md:py-5 rounded-2xl md:rounded-3xl text-xl md:text-2xl uppercase shadow-lg shrink-0"
                 >
                   Main Lagi!
