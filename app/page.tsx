@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { createClient, RealtimeChannel } from "@supabase/supabase-js";
 import TugOfWarArena from "@/components/TugOfWarArena";
+import { isValidWord } from "@/data/word-database";
 
 /**
  * 1. SUPABASE CONFIGURATION
@@ -303,7 +304,20 @@ export default function SambungCepat() {
       return;
     }
 
-    // 5. Validasi: Kata pertama input harus sama dengan kata kedua frasa saat ini
+    // 5. Validasi: Apakah kata-kata ada di database?
+    // 💡 TEAM 3: Jika ingin menggunakan database Supabase, ganti isValidWord dengan fetch ke table 'words'
+    /*
+    const { data: valid1 } = await supabase.from('words').select('id').eq('word', inputWords[0]).single();
+    const { data: valid2 } = await supabase.from('words').select('id').eq('word', inputWords[1]).single();
+    if (!valid1 || !valid2) { ... }
+    */
+    if (!isValidWord(inputWords[0]) || !isValidWord(inputWords[1])) {
+      const invalidWord = !isValidWord(inputWords[0]) ? inputWords[0] : inputWords[1];
+      triggerError(`Kata "${invalidWord.toUpperCase()}" tidak ada di database!`);
+      return;
+    }
+
+    // 6. Validasi: Kata pertama input harus sama dengan kata kedua frasa saat ini
     if (inputWords[0] === currentWords[1]) {
       setWarning("");
       playClickSound();
