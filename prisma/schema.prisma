@@ -21,6 +21,7 @@ model Room {
   status      String   @default("waiting")
 
   currentWord String?
+  usedWords   String[] @default([])
   turnIndex   Int      @default(0)
 
   createdAt   DateTime @default(now())
@@ -39,7 +40,6 @@ model MatchHistory {
 model Dictionary {
   id       Int     @id @default(autoincrement())
   word     String  @unique
-  isPhrase Boolean @default(false)
 }
 model Player {
   id       Int   @id @default(autoincrement())

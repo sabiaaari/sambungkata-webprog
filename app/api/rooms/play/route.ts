@@ -29,6 +29,11 @@ export async function POST(req: Request) {
     // normalisasi kata
     const lowerWord = word.toLowerCase().trim();
 
+    // Validasi: Harus 1 kata
+    if (lowerWord.includes(' ')) {
+       return Response.json({ error: "Hanya boleh 1 kata" }, { status: 400 });
+    }
+
     // cek dictionary
     const dict = await prisma.dictionary.findUnique({
       where: { word: lowerWord }
@@ -38,19 +43,18 @@ export async function POST(req: Request) {
       return Response.json({ error: `Kata "${word}" tidak ada di database` }, { status: 400 });
     }
 
-    // cek sambung kata (Word Chain Logic)
+    // cek duplikasi
+    if (room.usedWords.includes(lowerWord)) {
+      return Response.json({ error: `Kata "${word.toUpperCase()}" sudah pernah digunakan` }, { status: 400 });
+    }
+
+    // cek sambung kata (Last Letter Logic)
     if (room.currentWord) {
-      const currentWords = room.currentWord.toLowerCase().split(' ');
-      const inputWords = lowerWord.split(' ');
+      const lastChar = room.currentWord.toLowerCase().trim().slice(-1);
+      const firstChar = lowerWord.charAt(0);
 
-      // Validasi: Harus 2 kata (sesuai logic frontend)
-      if (inputWords.length < 2) {
-         return Response.json({ error: "Minimal 2 kata" }, { status: 400 });
-      }
-
-      // Kata pertama input harus sama dengan kata terakhir (kata kedua) currentWord
-      if (inputWords[0] !== currentWords[currentWords.length - 1]) {
-        return Response.json({ error: `Kata pertama harus "${currentWords[currentWords.length - 1].toUpperCase()}"` }, { status: 400 });
+      if (firstChar !== lastChar) {
+        return Response.json({ error: `Kata harus berawalan huruf "${lastChar.toUpperCase()}"` }, { status: 400 });
       }
     }
 
@@ -71,7 +75,10 @@ export async function POST(req: Request) {
     const updatedRoom = await prisma.room.update({
       where: { id: room.id },
       data: {
-        currentWord: word,
+        currentWord: lowerWord,
+        usedWords: {
+          push: lowerWord
+        },
         turnIndex: nextTurn
       }
     });

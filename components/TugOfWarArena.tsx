@@ -31,7 +31,10 @@ const CharacterLayer = ({ isRight, children, zIndex }: { isRight: boolean, child
  */
 const TugOfWarArena = ({ ropePosition = 50 }) => {
   // Calculate relative displacement from center (50)
-  const displacement = (ropePosition - 50) * 4; 
+  // ropePosition comes in as (logicPos + 50), so logicPos is (ropePosition - 50)
+  // logicPos range is -10 to 10.
+  // We want logicPos 10 to move significantly, e.g., 150px.
+  const displacement = (ropePosition - 50) * 15; 
 
   return (
     <div className="h-full w-full flex items-center justify-center relative overflow-hidden">
@@ -47,9 +50,13 @@ const TugOfWarArena = ({ ropePosition = 50 }) => {
 
       {/* Responsive Wrapper Container - Flexible height and wider reach */}
       <div className="relative w-full max-w-2xl md:max-w-4xl h-full flex items-center justify-center px-4 md:px-8">
-        
+
         {/* Central Balance Line (Static) */}
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-px h-16 bg-slate-400 z-0 opacity-50" />
+
+        {/* Finish Lines (Static) */}
+        <div className="absolute left-8 md:left-16 top-1/2 -translate-y-1/2 w-1 md:w-2 h-24 bg-red-500/30 rounded-full z-0 blur-[1px]" />
+        <div className="absolute right-8 md:right-16 top-1/2 -translate-y-1/2 w-1 md:w-2 h-24 bg-blue-500/30 rounded-full z-0 blur-[1px]" />
 
         {/* --- MOVING ARENA GROUP ---
             Everything inside this group moves together and shares the same Stacking Context.

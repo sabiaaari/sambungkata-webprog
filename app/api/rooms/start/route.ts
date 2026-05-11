@@ -22,11 +22,12 @@ export async function POST(req: Request) {
     }
 
     const words = await prisma.dictionary.findMany();
-    let initialWord = "MEJA MAKAN"; // Default fallback
+    let initialWord = "NASI"; // Default fallback
     
     if (words.length > 0) {
       const random = words[Math.floor(Math.random() * words.length)];
-      initialWord = random.word;
+      // Ambil hanya kata pertama jika di database ada frasa, untuk memastikan format 1 kata
+      initialWord = random.word.trim().split(" ")[0].toUpperCase();
     }
 
     const updated = await prisma.room.update({
@@ -34,13 +35,17 @@ export async function POST(req: Request) {
       data: {
         status: "playing",
         currentWord: initialWord,
+        usedWords: [initialWord.toLowerCase()],
         turnIndex: 0
       }
     });
 
     return Response.json({
       message: "Game started",
-      room: updated
+      room: {
+        ...updated,
+        players: room.players
+      }
     });
 
   } catch (error: any) {

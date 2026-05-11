@@ -10,8 +10,7 @@ async function main() {
   // await prisma.dictionary.deleteMany({})
 
   const wordsToInsert = VALID_WORDS.map(word => ({
-    word: word.toLowerCase(),
-    isPhrase: word.includes(' ')
+    word: word.toLowerCase()
   }))
 
   for (const wordData of wordsToInsert) {

@@ -66,7 +66,6 @@ export default function SambungCepat() {
   });
   const [winnerData, setWinnerData] = useState<WinnerData | null>(null);
   const [usedPhrases, setUsedPhrases] = useState<string[]>(["meja makan"]);
-  const [isYourTurn, setIsYourTurn] = useState(false);
 
   const [isMuted, setIsMuted] = useState(false);
   const [warning, setWarning] = useState("");
@@ -119,7 +118,6 @@ export default function SambungCepat() {
   const syncStateWithServer = useCallback((serverPayload: { newWord: string, ropePos: number, isMyTurn: boolean, lastPlayerName: string }) => {
     setCurrentPhrase(serverPayload.newWord);
     setRopePosition(serverPayload.ropePos);
-    setIsYourTurn(serverPayload.isMyTurn);
     setUsedPhrases((prev) => [...prev, serverPayload.newWord.toLowerCase()]);
 
     // Suara untuk pergerakan lawan
@@ -130,7 +128,9 @@ export default function SambungCepat() {
     // =================================================================
     // 🚀 TODO TEAM 3 (WEBSOCKETS): AREA INTEGRASI SOCKET.IO / PUSHER
     // =================================================================
-    if (!roomCode || !supabase || currentScreen !== "ARENA") return;
+
+    
+    if (!roomCode || !supabase || (currentScreen !== "ARENA" && currentScreen !== "LOBBY")) return;
 
     // Listen to changes in the Room table
     const channel = supabase
@@ -145,6 +145,15 @@ export default function SambungCepat() {
         },
         async (payload) => {
           const updatedRoom = payload.new;
+
+          // 1. Sinkronisasi Layar (Lobby -> Arena)
+          // Jika status berubah jadi 'playing', semua pemain pindah ke Arena
+          if (updatedRoom.status === "playing" && currentScreen === "LOBBY") {
+            setCurrentScreen("ARENA");
+          }
+
+          // Safety Check: Hanya proses data jika sudah di Arena atau sedang transisi ke Arena
+          if (currentScreen !== "ARENA" && updatedRoom.status !== "playing") return;
 
           // Fetch current players to calculate turn and score
           const { data: players } = await supabase
@@ -275,6 +284,7 @@ export default function SambungCepat() {
   const handleStartGame = async () => {
     if (!isHost) return;
 
+    // Host mengirim request ke API untuk mengubah status di DB
     const res = await fetch("/api/rooms/start", {
       method: "POST",
       headers: {
@@ -286,13 +296,15 @@ export default function SambungCepat() {
     });
 
     if (res.ok) {
+      // Kita tetap memanggil setCurrentScreen secara lokal untuk Host agar UX lebih cepat
+      // Broadcast juga dikirim sebagai fallback
       broadcastUpdate({
         currentScreen: "ARENA",
       });
       setCurrentScreen("ARENA");
     } else {
       const data = await res.json().catch(() => ({}));
-      triggerError(data?.error || "Minimal 2 pemain!");
+      triggerError(data?.error || "Gagal memulai permainan!");
     }
   };
 
@@ -316,7 +328,7 @@ export default function SambungCepat() {
     }
   };
 
-  const handleKirim = () => {
+  const handleKirim = async () => {
     // 1. Normalisasi String
     const normalizedInput = inputValue.trim().replace(/\s+/g, ' ');
     if (!normalizedInput) return;
@@ -346,23 +358,16 @@ export default function SambungCepat() {
         .from("Dictionary")
         .select("id")
         .eq("word", inputWords[0])
-        .single();
+        .maybeSingle();
         
       const { data: dict2 } = await supabase
         .from("Dictionary")
         .select("id")
         .eq("word", inputWords[1])
-        .single();
+        .maybeSingle();
 
       if (!dict1 || !dict2) {
         const invalidWord = !dict1 ? inputWords[0] : inputWords[1];
-        triggerError(`Kata "${invalidWord.toUpperCase()}" tidak ada di database!`);
-        return;
-      }
-    } else {
-      // Fallback ke local jika supabase tidak terkoneksi (opsional)
-      if (!isValidWord(inputWords[0]) || !isValidWord(inputWords[1])) {
-        const invalidWord = !isValidWord(inputWords[0]) ? inputWords[0] : inputWords[1];
         triggerError(`Kata "${invalidWord.toUpperCase()}" tidak ada di database!`);
         return;
       }
@@ -532,7 +537,7 @@ export default function SambungCepat() {
                   transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
                   className="text-4xl md:text-6xl font-black tracking-tight text-orange-500 leading-none shrink-0"
                 >
-                  SAMBUNG<br /><span className="text-yellow-400">KATA!</span>
+                  CHAIN<br /><span className="text-yellow-400">CRUSH!</span>
                 </motion.h1>
                 
                 <div className="flex flex-col gap-4 md:gap-6 shrink-0">
@@ -607,7 +612,7 @@ export default function SambungCepat() {
               {/* COPYRIGHT FOOTER */}
               <div className="mt-auto py-6 text-center shrink-0">
                 <p className="text-[10px] md:text-xs font-bold text-white/60 uppercase tracking-[0.2em]">
-                  &copy; {new Date().getFullYear()} SAMBUNG KATA
+                  &copy; {new Date().getFullYear()} CHAINCRUSH
                 </p>
                 <p className="text-[10px] md:text-xs font-black text-white/80 uppercase tracking-widest mt-1">
                   KELOMPOK 22 • AZALIA • SIPA • SYAILA • SIXTA
