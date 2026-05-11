@@ -235,18 +235,20 @@ export default function SambungCepat() {
   }, [roomCode, currentScreen]);
 
   // 7. GAME LOGIC FUNCTIONS
-  const handleStartGame = () => {
+  const handleStartGame = async () => {
     if (!isHost) return;
-    setStats({ totalCorrect: 0, totalTime: 0, turns: 0 });
-    setUsedPhrases(["meja makan"]);
-    broadcastUpdate({
-      currentScreen: "ARENA",
-      timeLeft: 10,
-      currentPhrase: "Meja Makan",
-      ropePosition: 0,
-      currentTurn: "P1",
-      usedPhrases: ["meja makan"],
+
+    await fetch("/api/rooms/start", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        roomCode
+      })
     });
+
+    setCurrentScreen("ARENA");
   };
 
   const checkWinner = (newPos: number) => {
@@ -355,16 +357,49 @@ export default function SambungCepat() {
     return "bg-red-400";
   };
 
-  const handleCreateRoom = () => {
+  const handleCreateRoom = async () => {
     if (!playerName.trim()) return;
-    const code = Math.random().toString(36).substring(2, 6).toUpperCase();
+
+    const res = await fetch("/api/rooms/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      triggerError(data?.error || "Gagal membuat ruangan");
+      return;
+    }
+
+    const data: { roomCode?: string } = await res.json();
+    if (!data.roomCode) {
+      triggerError("Backend tidak mengembalikan roomCode");
+      return;
+    }
+
+    setRoomCode(data.roomCode);
     setIsHost(true);
-    setRoomCode(code);
     setCurrentScreen("LOBBY");
   };
 
-  const handleJoinRoom = () => {
+  const handleJoinRoom = async () => {
     if (!playerName.trim() || !roomCode) return;
+
+    const res = await fetch("/api/rooms/join", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        roomCode,
+        username: playerName,
+      }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      triggerError(data?.error || "Gagal bergabung");
+      return;
+    }
+
     setIsHost(false);
     setCurrentScreen("LOBBY");
   };

@@ -1,0 +1,55 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique
+  createdAt DateTime @default(now())
+
+  players   Player[]
+}
+
+model Room {
+  id          Int      @id @default(autoincrement())
+  roomCode    String   @unique
+  status      String   @default("waiting")
+
+  currentWord String?
+  turnIndex   Int      @default(0)
+
+  createdAt   DateTime @default(now())
+
+  players     Player[]
+}
+
+model MatchHistory {
+  id         Int      @id @default(autoincrement())
+  roomCode   String
+  winnerName String
+  score      Int
+  playedAt   DateTime @default(now())
+}
+
+model Dictionary {
+  id       Int     @id @default(autoincrement())
+  word     String  @unique
+  isPhrase Boolean @default(false)
+}
+model Player {
+  id       Int   @id @default(autoincrement())
+  username String
+
+  userId   Int?
+  user     User? @relation(fields: [userId], references: [id])
+
+  roomId   Int
+  room     Room  @relation(fields: [roomId], references: [id])
+
+  score    Int   @default(0)
+}
