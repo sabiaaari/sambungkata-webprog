@@ -238,7 +238,7 @@ export default function SambungCepat() {
   const handleStartGame = async () => {
     if (!isHost) return;
 
-    await fetch("/api/rooms/start", {
+    const res = await fetch("/api/rooms/start", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -248,7 +248,15 @@ export default function SambungCepat() {
       })
     });
 
-    setCurrentScreen("ARENA");
+    if (res.ok) {
+      broadcastUpdate({
+        currentScreen: "ARENA",
+      });
+      setCurrentScreen("ARENA");
+    } else {
+      const data = await res.json().catch(() => ({}));
+      triggerError(data?.error || "Minimal 2 pemain!");
+    }
   };
 
   const checkWinner = (newPos: number) => {
@@ -363,6 +371,7 @@ export default function SambungCepat() {
     const res = await fetch("/api/rooms/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: playerName }),
     });
 
     if (!res.ok) {
@@ -402,6 +411,13 @@ export default function SambungCepat() {
 
     setIsHost(false);
     setCurrentScreen("LOBBY");
+    
+    // Beritahu host bahwa ada yang bergabung (jika sudah subscribe)
+    setTimeout(() => {
+      broadcastUpdate({
+        actionPlayer: playerName
+      });
+    }, 1000);
   };
 
   const springTransition = { type: "spring" as const, stiffness: 100, damping: 10 };
@@ -556,20 +572,22 @@ export default function SambungCepat() {
                         {[0,1,2].map(i => (
                           <motion.div 
                             key={i} 
-                            animate={{ scale: [1, 1.5, 1], y: [0, -6, 0] }} 
+                            animate={{ scale: [1, 1.2, 1], y: [0, -6, 0] }} 
                             transition={{ repeat: Infinity, duration: 0.8, delay: i * 0.15 }} 
                             className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'} border-2 border-white`} 
                           />
                         ))}
                       </div>
+                      {!isConnected && (
+                        <p className="text-[10px] text-red-500 font-bold uppercase">Realtime Belum Terkoneksi</p>
+                      )}
                   </div>
                 </div>
 
                 {isHost ? (
                   <button 
-                    disabled={!isConnected}
                     onClick={() => { playClickSound(); handleStartGame(); }} 
-                    className={`w-full py-4 md:py-6 rounded-2xl md:rounded-3xl font-black uppercase text-xl md:text-2xl border-b-4 md:border-b-8 shadow-lg shrink-0 ${isConnected ? 'bg-yellow-400 text-yellow-950 border-yellow-600 active:border-b-0 active:translate-y-1' : 'bg-slate-200 text-slate-400 border-slate-300 cursor-not-allowed'}`}
+                    className={`w-full py-4 md:py-6 rounded-2xl md:rounded-3xl font-black uppercase text-xl md:text-2xl border-b-4 md:border-b-8 shadow-lg shrink-0 bg-yellow-400 text-yellow-950 border-yellow-600 active:border-b-0 active:translate-y-1`}
                   >
                     GAS MULAI!
                   </button>
@@ -578,14 +596,6 @@ export default function SambungCepat() {
                     <p className="font-black text-sm text-blue-600 uppercase">Menunggu Host...</p>
                   </div>
                 )}
-
-                {/* TOMBOL SIMULASI (Mockup Only) */}
-                <button 
-                  onClick={() => { playClickSound(); setCurrentScreen("ARENA"); }}
-                  className="mt-4 text-[10px] font-bold text-blue-300 hover:text-blue-500 transition-colors uppercase tracking-widest"
-                >
-                  SIMULASI MULAI MAIN
-                </button>
               </div>
             </div>
           </motion.div>

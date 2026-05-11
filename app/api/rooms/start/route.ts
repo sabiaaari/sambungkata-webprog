@@ -22,13 +22,18 @@ export async function POST(req: Request) {
     }
 
     const words = await prisma.dictionary.findMany();
-    const random = words[Math.floor(Math.random() * words.length)];
+    let initialWord = "MEJA MAKAN"; // Default fallback
+    
+    if (words.length > 0) {
+      const random = words[Math.floor(Math.random() * words.length)];
+      initialWord = random.word;
+    }
 
     const updated = await prisma.room.update({
       where: { id: room.id },
       data: {
         status: "playing",
-        currentWord: random.word,
+        currentWord: initialWord,
         turnIndex: 0
       }
     });

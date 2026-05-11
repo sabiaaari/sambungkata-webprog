@@ -30,8 +30,7 @@ async function createUniqueRoomCode() {
 
 export async function POST(req: Request) {
   try {
-    // AMANIN JSON PARSE (meskipun belum dipakai)
-    await req.json().catch(() => ({}));
+    const { username } = await req.json().catch(() => ({}));
 
     const roomCode = await createUniqueRoomCode();
 
@@ -39,7 +38,15 @@ export async function POST(req: Request) {
       data: {
         roomCode,
         status: "waiting",
+        players: username ? {
+          create: {
+            username
+          }
+        } : undefined
       },
+      include: {
+        players: true
+      }
     });
 
     return Response.json(room);
