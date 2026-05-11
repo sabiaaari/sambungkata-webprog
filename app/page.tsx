@@ -131,18 +131,55 @@ export default function SambungCepat() {
     // =================================================================
     // 🚀 TODO TEAM 3 (WEBSOCKETS): AREA INTEGRASI SOCKET.IO / PUSHER
     // =================================================================
-    // 1. Inisialisasi koneksi socket di sini.
-    // 2. Dengarkan event dari server (misal: socket.on('updateGameState', ...))
-    // 3. Saat data masuk, panggil fungsi pengumpan UI di bawah ini:
-    //
-    // syncStateWithServer({
-    //   newWord: data.word,
-    //   ropePos: data.position,
-    //   isMyTurn: data.nextTurn === myPlayerId,
-    //   lastPlayerName: data.playerName
-    // });
+    if (!roomCode || !supabase || currentScreen !== "ARENA") return;
+
+    // Listen to changes in the Room table
+    const channel = supabase
+      .channel(`db-room-${roomCode}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "Room",
+          filter: `roomCode=eq.${roomCode}`,
+        },
+        async (payload) => {
+          const updatedRoom = payload.new;
+
+          // Fetch current players to calculate turn and score
+          const { data: players } = await supabase
+            .from("Player")
+            .select("*")
+            .eq("roomId", updatedRoom.id)
+            .order("id", { ascending: true });
+
+          if (players && players.length >= 2) {
+            const p1 = players[0];
+            const p2 = players[1];
+            
+            // Calculate rope position based on score difference (P2 score - P1 score) * 10
+            const calculatedRopePos = (p2.score - p1.score) * 10;
+            
+            const currentPlayer = players[updatedRoom.turnIndex];
+            const isMyTurnNow = currentPlayer?.username === playerName;
+
+            syncStateWithServer({
+              newWord: updatedRoom.currentWord || "",
+              ropePos: calculatedRopePos,
+              isMyTurn: isMyTurnNow,
+              lastPlayerName: updatedRoom.turnIndex === 0 ? p2.username : p1.username
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
     // =================================================================
-  }, [syncStateWithServer]);
+  }, [supabase, roomCode, currentScreen, playerName, syncStateWithServer]);
 
   // ERROR TRIGGER (SHAKE + WARNING)
   const triggerError = (msg: string) => {
@@ -335,6 +372,14 @@ export default function SambungCepat() {
 
       const newUsedPhrases = [...usedPhrases, lowerInput];
       setUsedPhrases(newUsedPhrases);
+
+      // 🔥 UPDATE KE BACKEND PRISMA
+      // Kita panggil API tapi tetap broadcast untuk sinkronisasi instan UI (Rope & Turn)
+      fetch("/api/rooms/play", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomCode, username: playerName, word: normalizedInput }),
+      }).catch(err => console.error("API Play Error:", err));
 
       broadcastUpdate({
         currentPhrase: normalizedInput,
