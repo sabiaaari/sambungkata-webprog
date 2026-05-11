@@ -26,22 +26,31 @@ export async function POST(req: Request) {
       return Response.json({ error: "Bukan giliran kamu" }, { status: 403 });
     }
 
+    // normalisasi kata
+    const lowerWord = word.toLowerCase().trim();
+
     // cek dictionary
     const dict = await prisma.dictionary.findUnique({
-      where: { word }
+      where: { word: lowerWord }
     });
 
     if (!dict) {
-      return Response.json({ error: "Kata tidak valid" }, { status: 400 });
+      return Response.json({ error: `Kata "${word}" tidak ada di database` }, { status: 400 });
     }
 
-    // cek sambung kata
+    // cek sambung kata (Word Chain Logic)
     if (room.currentWord) {
-      const lastChar = room.currentWord.slice(-1);
-      const firstChar = word[0];
+      const currentWords = room.currentWord.toLowerCase().split(' ');
+      const inputWords = lowerWord.split(' ');
 
-      if (lastChar !== firstChar) {
-        return Response.json({ error: "Tidak nyambung" }, { status: 400 });
+      // Validasi: Harus 2 kata (sesuai logic frontend)
+      if (inputWords.length < 2) {
+         return Response.json({ error: "Minimal 2 kata" }, { status: 400 });
+      }
+
+      // Kata pertama input harus sama dengan kata terakhir (kata kedua) currentWord
+      if (inputWords[0] !== currentWords[currentWords.length - 1]) {
+        return Response.json({ error: `Kata pertama harus "${currentWords[currentWords.length - 1].toUpperCase()}"` }, { status: 400 });
       }
     }
 

@@ -43,7 +43,7 @@ export async function POST(req: Request) {
       room: updated
     });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error(error);
     return Response.json(
       { error: "Start failed" },
