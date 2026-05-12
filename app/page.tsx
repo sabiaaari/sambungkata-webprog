@@ -24,6 +24,7 @@ type Turn = "P1" | "P2";
 interface WinnerData {
   name: string;
   score: number;
+  avgTime?: string;
 }
 
 interface GamePayload {
