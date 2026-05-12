@@ -24,7 +24,6 @@ type Turn = "P1" | "P2";
 interface WinnerData {
   name: string;
   score: number;
-  avgTime: string;
 }
 
 interface GamePayload {
@@ -32,10 +31,13 @@ interface GamePayload {
   currentPhrase?: string;
   ropePosition?: number;
   currentTurn?: Turn;
+  momentumOwner?: Turn | null;
   timeLeft?: number;
   actionPlayer?: string;
   winnerData?: WinnerData;
   usedPhrases?: string[];
+  p1Name?: string;
+  p2Name?: string;
 }
 
 /**
@@ -49,14 +51,17 @@ export default function SambungCepat() {
   // 1. ALL STATES & REFS (AT THE TOP)
   const [currentScreen, setCurrentScreen] = useState<ScreenState>("HOME");
   const [playerName, setPlayerName] = useState("");
+  const [p1Name, setP1Name] = useState("Player 1");
+  const [p2Name, setP2Name] = useState("Player 2");
   const [roomCode, setRoomCode] = useState("");
   const [isHost, setIsHost] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   
-  const [currentPhrase, setCurrentPhrase] = useState("Meja Makan");
+  const [currentPhrase, setCurrentPhrase] = useState("MEJA");
   const [currentTurn, setCurrentTurn] = useState<Turn>("P1");
+  const [momentumOwner, setMomentumOwner] = useState<Turn | null>(null);
   const [ropePosition, setRopePosition] = useState(0); 
-  const [timeLeft, setTimeLeft] = useState(10);
+  const [timeLeft, setTimeLeft] = useState(15);
   const [inputValue, setInputValue] = useState("");
   
   const [stats, setStats] = useState({ 
@@ -65,7 +70,7 @@ export default function SambungCepat() {
     turns: 0 
   });
   const [winnerData, setWinnerData] = useState<WinnerData | null>(null);
-  const [usedPhrases, setUsedPhrases] = useState<string[]>(["meja makan"]);
+  const [usedPhrases, setUsedPhrases] = useState<string[]>(["meja"]);
 
   const [isMuted, setIsMuted] = useState(false);
   const [warning, setWarning] = useState("");
@@ -208,13 +213,14 @@ export default function SambungCepat() {
     playClickSound();
     // Reset State Permainan
     setRopePosition(0);
-    setCurrentPhrase("Meja Makan");
-    setUsedPhrases(["meja makan"]);
+    setMomentumOwner(null);
+    setCurrentPhrase("MEJA");
+    setUsedPhrases(["meja"]);
     setStats({ totalCorrect: 0, totalTime: 0, turns: 0 });
     setWinnerData(null);
     setWarning("");
     setInputValue("");
-    setTimeLeft(10);
+    setTimeLeft(15);
     setCurrentTurn("P1");
     // Pindah ke Home
     setCurrentScreen("HOME");
@@ -260,9 +266,12 @@ export default function SambungCepat() {
         if (payload.currentPhrase) setCurrentPhrase(payload.currentPhrase);
         if (payload.ropePosition !== undefined) setRopePosition(payload.ropePosition);
         if (payload.currentTurn) setCurrentTurn(payload.currentTurn);
+        if (payload.momentumOwner !== undefined) setMomentumOwner(payload.momentumOwner);
         if (payload.timeLeft !== undefined) setTimeLeft(payload.timeLeft);
         if (payload.winnerData) setWinnerData(payload.winnerData);
         if (payload.usedPhrases) setUsedPhrases(payload.usedPhrases);
+        if (payload.p1Name) setP1Name(payload.p1Name);
+        if (payload.p2Name) setP2Name(payload.p2Name);
       })
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
@@ -296,11 +305,26 @@ export default function SambungCepat() {
     });
 
     if (res.ok) {
+      const data = await res.json();
+      const initialWord = data.room?.currentWord || "MEJA";
+      
+      const p1 = data.room?.players?.[0]?.username || playerName;
+      const p2 = data.room?.players?.[1]?.username || "Lawan";
+
+      setP1Name(p1);
+      setP2Name(p2);
+
       // Kita tetap memanggil setCurrentScreen secara lokal untuk Host agar UX lebih cepat
       // Broadcast juga dikirim sebagai fallback
       broadcastUpdate({
         currentScreen: "ARENA",
+        currentPhrase: initialWord,
+        usedPhrases: [initialWord.toLowerCase()],
+        p1Name: p1,
+        p2Name: p2
       });
+      setCurrentPhrase(initialWord);
+      setUsedPhrases([initialWord.toLowerCase()]);
       setCurrentScreen("ARENA");
     } else {
       const data = await res.json().catch(() => ({}));
@@ -310,21 +334,36 @@ export default function SambungCepat() {
 
   const checkWinner = (newPos: number) => {
     if (newPos <= -100 || newPos >= 100) {
+      setMomentumOwner(null); // Stop momentum
       const winner = newPos <= -100 ? "P1" : "P2";
-      const winName = winner === "P1" ? (isHost ? playerName : "Lawan") : (!isHost ? playerName : "Lawan");
+      const winName = winner === "P1" ? p1Name : p2Name;
       const avg = stats.turns > 0 ? (stats.totalTime / stats.turns).toFixed(1) : "0";
       
+      // Save winner to database
+      fetch("/api/rooms/winner", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomCode, winnerName: winName, score: stats.totalCorrect }),
+      }).catch(err => console.error("API Winner Error:", err));
+
       // TUNGGU 1 DETIK SEBELUM KE RESULT
       setTimeout(() => {
         broadcastUpdate({
           currentScreen: "RESULT",
+          momentumOwner: null,
           winnerData: {
             name: winName,
             score: stats.totalCorrect,
             avgTime: avg
           }
         });
-      }, 1000);
+        setWinnerData({
+          name: winName,
+          score: stats.totalCorrect,
+          avgTime: avg
+        });
+        setCurrentScreen("RESULT");
+      }, 500);
     }
   };
 
@@ -338,49 +377,42 @@ export default function SambungCepat() {
 
     // 2. Cek Duplikasi (History)
     if (usedPhrases.includes(lowerInput)) {
-      triggerError("Frasa ini sudah pernah digunakan! Cari kombinasi lain.");
+      triggerError("Kata ini sudah pernah digunakan! Cari kombinasi lain.");
       return;
     }
 
-    // 3. Pecah frasa saat ini dan input menjadi array
-    const currentWords = lowerCurrent.split(' ');
-    const inputWords = lowerInput.split(' ');
-
-    // 4. Validasi: Tepat 2 kata
-    if (inputWords.length !== 2) {
-      triggerError("Masukkan tepat 2 kata!");
+    // 3. Validasi: Harus 1 kata
+    if (lowerInput.includes(' ')) {
+      triggerError("Hanya boleh 1 kata!");
       return;
     }
 
-    // 5. Validasi: Apakah kata-kata ada di database Supabase?
-    if (supabase) {
-      const { data: dict1 } = await supabase
-        .from("Dictionary")
-        .select("id")
-        .eq("word", inputWords[0])
-        .maybeSingle();
-        
-      const { data: dict2 } = await supabase
-        .from("Dictionary")
-        .select("id")
-        .eq("word", inputWords[1])
-        .maybeSingle();
+    // 4. Validasi: Apakah kata ada di database Prisma?
+    const checkRes = await fetch("/api/dictionary/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ word: lowerInput }),
+    });
 
-      if (!dict1 || !dict2) {
-        const invalidWord = !dict1 ? inputWords[0] : inputWords[1];
-        triggerError(`Kata "${invalidWord.toUpperCase()}" tidak ada di database!`);
-        return;
-      }
+    if (!checkRes.ok) {
+      triggerError(`Kata "${lowerInput.toUpperCase()}" tidak valid atau tidak ada di database!`);
+      return;
     }
 
-    // 6. Validasi: Kata pertama input harus sama dengan kata kedua frasa saat ini
-    if (inputWords[0] === currentWords[1]) {
+    // 5. Validasi: Huruf pertama input harus sama dengan huruf terakhir frasa saat ini
+    const lastChar = lowerCurrent.slice(-1);
+    const firstChar = lowerInput.charAt(0);
+
+    if (firstChar === lastChar) {
       setWarning("");
       playClickSound();
       
       const nextTurn: Turn = currentTurn === "P1" ? "P2" : "P1";
       const moveDirection = currentTurn === "P1" ? -10 : 10;
       const newPos = Math.max(-100, Math.min(100, ropePosition + moveDirection));
+
+      // SET MOMENTUM
+      setMomentumOwner(currentTurn);
 
       const timeUsed = 10 - timeLeft;
       setStats(prev => ({
@@ -393,7 +425,6 @@ export default function SambungCepat() {
       setUsedPhrases(newUsedPhrases);
 
       // 🔥 UPDATE KE BACKEND PRISMA
-      // Kita panggil API tapi tetap broadcast untuk sinkronisasi instan UI (Rope & Turn)
       fetch("/api/rooms/play", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -404,16 +435,45 @@ export default function SambungCepat() {
         currentPhrase: normalizedInput,
         ropePosition: newPos,
         currentTurn: nextTurn,
-        timeLeft: 10,
+        momentumOwner: currentTurn, // Broadcast momentum
+        timeLeft: 15, // Reset to 15
         usedPhrases: newUsedPhrases,
       });
+      setTimeLeft(15);
       setInputValue("");
       checkWinner(newPos);
     } else {
-      triggerError(`Kata pertama harus "${currentWords[1].toUpperCase()}"!`);
+      triggerError(`Huruf pertama harus "${lastChar.toUpperCase()}"!`);
     }
   };
 
+  // 8. CONTINUOUS MOMENTUM EFFECT
+  useEffect(() => {
+    if (currentScreen !== "ARENA" || !momentumOwner) return;
+
+    const momentumInterval = setInterval(() => {
+      setRopePosition((prev) => {
+        // P1 pulls to negative, P2 pulls to positive
+        const pullAmount = momentumOwner === "P1" ? -0.5 : 0.5;
+        const nextPos = prev + pullAmount;
+        
+        // Check for boundary (Instant win check in momentum)
+        if (nextPos <= -100 || nextPos >= 100) {
+          clearInterval(momentumInterval);
+          checkWinner(nextPos);
+          return Math.max(-100, Math.min(100, nextPos));
+        }
+        
+        return nextPos;
+      });
+    }, 50); // Every 50ms for smooth movement
+
+    return () => clearInterval(momentumInterval);
+  }, [currentScreen, momentumOwner]);
+
+  const isMyTurn = (isHost && currentTurn === "P1") || (!isHost && currentTurn === "P2");
+
+  // 9. TIMER EFFECT
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (currentScreen === "ARENA" && timeLeft > 0) {
@@ -421,21 +481,27 @@ export default function SambungCepat() {
         setTimeLeft((prev) => prev - 1);
       }, 1000);
     } else if (timeLeft === 0 && currentScreen === "ARENA") {
-      const myPlayerRole: Turn = isHost ? "P1" : "P2";
-      if (currentTurn === myPlayerRole) {
+      // PENALTY LOGIC: If time runs out, move rope to opponent
+      if (isMyTurn) {
         const nextTurn: Turn = currentTurn === "P1" ? "P2" : "P1";
-        const penalty = currentTurn === "P1" ? 15 : -15;
+        const penalty = currentTurn === "P1" ? 20 : -20; // Big penalty for timeout
+        const newPos = Math.max(-100, Math.min(100, ropePosition + penalty));
+        
         broadcastUpdate({
-          ropePosition: Math.max(-100, Math.min(100, ropePosition + penalty)),
+          ropePosition: newPos,
           currentTurn: nextTurn,
-          timeLeft: 10,
+          momentumOwner: nextTurn, // Momentum switches to opponent
+          timeLeft: 15,
         });
+        setRopePosition(newPos);
+        setCurrentTurn(nextTurn);
+        setMomentumOwner(nextTurn);
+        setTimeLeft(15);
+        checkWinner(newPos);
       }
     }
     return () => clearInterval(timer);
-  }, [currentScreen, timeLeft, currentTurn, isHost, ropePosition, broadcastUpdate]);
-
-  const isMyTurn = (isHost && currentTurn === "P1") || (!isHost && currentTurn === "P2");
+  }, [currentScreen, timeLeft, isMyTurn, currentTurn, ropePosition, broadcastUpdate]);
 
   const getTimerColor = () => {
     if (timeLeft > 5) return "bg-green-400";
@@ -589,14 +655,14 @@ export default function SambungCepat() {
                   <div className="flex items-start gap-4 mb-4">
                     <div className="shrink-0 w-8 h-8 rounded-full bg-sky-400 flex items-center justify-center text-white font-bold shadow-sm text-sm">🔤</div>
                     <p className="text-sm md:text-base text-slate-700 font-medium leading-relaxed">
-                      Sambung <b>kata terakhir</b> lawan menjadi <b>kata pertama</b> di kalimatmu!
+                      Sambung <b>huruf terakhir</b> lawan menjadi <b>huruf pertama</b> di katamu!
                     </p>
                   </div>
 
                   <div className="flex items-start gap-4 mb-4">
                     <div className="shrink-0 w-8 h-8 rounded-full bg-yellow-400 flex items-center justify-center text-white font-bold shadow-sm text-sm">⚡</div>
                     <p className="text-sm md:text-base text-slate-700 font-medium leading-relaxed">
-                      Contoh: MEJA <b>MAKAN</b> ➡️ <b>MAKAN</b> MALAM. (Minimal 2 kata).
+                      Contoh: MEJ<b>A</b> ➡️ <b>A</b>YAM. (Hanya boleh 1 kata).
                     </p>
                   </div>
 
@@ -711,7 +777,7 @@ export default function SambungCepat() {
                 <div className="h-4 md:h-5 w-full bg-slate-100 rounded-full p-1 border-2 border-slate-200 shadow-inner overflow-hidden">
                   <motion.div 
                     initial={{ width: "100%" }}
-                    animate={{ width: `${timeLeft * 10}%` }}
+                    animate={{ width: `${(timeLeft / 15) * 100}%` }}
                     className={`h-full rounded-full transition-colors duration-500 ${getTimerColor()} border-b-2 border-black/10`}
                   />
                 </div>
@@ -796,14 +862,10 @@ export default function SambungCepat() {
                   <p className="text-3xl md:text-4xl font-black text-white uppercase truncate shrink-0">{winnerData.name}</p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 shrink-0">
+                <div className="flex flex-col gap-3 shrink-0">
                   <div className="bg-sky-100 p-3 rounded-2xl border-b-4 border-sky-200 shrink-0">
-                    <p className="text-[9px] font-black text-blue-400 uppercase">Total Kata</p>
+                    <p className="text-[10px] font-black text-blue-400 uppercase">Total Kata</p>
                     <p className="text-xl md:text-2xl font-black text-blue-900">{winnerData.score}</p>
-                  </div>
-                  <div className="bg-orange-100 p-3 rounded-2xl border-b-4 border-orange-200 shrink-0">
-                    <p className="text-[9px] font-black text-orange-400 uppercase">Avg Waktu</p>
-                    <p className="text-xl md:text-2xl font-black text-orange-600">{winnerData.avgTime}s</p>
                   </div>
                 </div>
 

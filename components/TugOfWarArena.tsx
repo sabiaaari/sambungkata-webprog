@@ -31,10 +31,10 @@ const CharacterLayer = ({ isRight, children, zIndex }: { isRight: boolean, child
  */
 const TugOfWarArena = ({ ropePosition = 50 }) => {
   // Calculate relative displacement from center (50)
-  // ropePosition comes in as (logicPos + 50), so logicPos is (ropePosition - 50)
-  // logicPos range is -10 to 10.
-  // We want logicPos 10 to move significantly, e.g., 150px.
-  const displacement = (ropePosition - 50) * 15; 
+  // ropePosition range is now -100 to 100 (logicPos), but passed as logicPos + 50.
+  // So ropePosition range is -50 to 150.
+  // displacement = (ropePosition - 50) * multiplier
+  const displacement = (ropePosition - 50) * 3; 
 
   return (
     <div className="h-full w-full flex items-center justify-center relative overflow-hidden">
