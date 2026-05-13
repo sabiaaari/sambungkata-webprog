@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useRouter } from "next/navigation";
 import { createClient, RealtimeChannel } from "@supabase/supabase-js";
 import TugOfWarArena from "@/components/TugOfWarArena";
 
@@ -75,7 +76,9 @@ export default function SambungCepat() {
 
   const [isMuted, setIsMuted] = useState(false);
   const [warning, setWarning] = useState("");
+  const [isCopied, setIsCopied] = useState(false);
   const [shouldShake, setShouldShake] = useState(false);
+  const router = useRouter();
   const bgmRef = useRef<HTMLAudioElement | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -258,6 +261,7 @@ export default function SambungCepat() {
     const channel = supabase.channel(channelName, {
       config: {
         broadcast: { self: true },
+        presence: { key: playerName },
       },
     });
 
@@ -274,9 +278,29 @@ export default function SambungCepat() {
         if (payload.p1Name) setP1Name(payload.p1Name);
         if (payload.p2Name) setP2Name(payload.p2Name);
       })
-      .subscribe((status) => {
+      .on("presence", { event: "sync" }, () => {
+        const state = channel.presenceState();
+        const playerIds = Object.keys(state);
+        
+        // Jika sedang bermain dan ada yang disconnect
+        if (currentScreen === "ARENA" && playerIds.length < 2) {
+          setMomentumOwner(null);
+          alert("Lawan terputus dari ruangan. Permainan dihentikan.");
+          router.push("/");
+        }
+      })
+      .on("presence", { event: "leave" }, ({ leftPresences }) => {
+        // Double check leave event
+        if (currentScreen === "ARENA") {
+          setMomentumOwner(null);
+          alert("Lawan terputus dari ruangan. Permainan dihentikan.");
+          router.push("/");
+        }
+      })
+      .subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
           setIsConnected(true);
+          await channel.track({ online_at: new Date().toISOString(), user: playerName });
         } else {
           setIsConnected(false);
         }
@@ -288,7 +312,7 @@ export default function SambungCepat() {
       channel.unsubscribe();
       setIsConnected(false);
     };
-  }, [roomCode, currentScreen]);
+  }, [roomCode, currentScreen, playerName, router]);
 
   // 7. GAME LOGIC FUNCTIONS
   const handleStartGame = async () => {
@@ -510,6 +534,13 @@ export default function SambungCepat() {
     return "bg-red-400";
   };
 
+  const handleCopyCode = () => {
+    navigator.clipboard.writeText(roomCode);
+    setIsCopied(true);
+    playClickSound();
+    setTimeout(() => setIsCopied(false), 2000);
+  };
+
   const handleCreateRoom = async () => {
     if (!playerName.trim()) return;
 
@@ -585,6 +616,20 @@ export default function SambungCepat() {
       >
         {isMuted ? "🔇" : "🔊"}
       </button>
+
+      {/* GLOBAL WARNING NOTIFICATION */}
+      <AnimatePresence>
+        {warning && (
+          <motion.div 
+            initial={{ y: -100, opacity: 0, x: "-50%" }}
+            animate={{ y: 20, opacity: 1, x: "-50%" }}
+            exit={{ y: -100, opacity: 0, x: "-50%" }}
+            className="fixed top-0 left-1/2 z-[100] bg-red-500 text-white px-6 py-3 rounded-2xl font-black uppercase shadow-2xl border-b-4 border-red-700 whitespace-nowrap text-sm md:text-base"
+          >
+            {warning}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence mode="wait">
         {/* --- SCREEN: HOME --- */}
@@ -703,9 +748,17 @@ export default function SambungCepat() {
               <div className="bg-white border-b-8 border-slate-200 p-6 md:p-10 rounded-[2.5rem] md:rounded-[3rem] shadow-2xl w-full max-w-sm md:max-w-md text-center flex flex-col gap-4 md:gap-8 max-h-full overflow-y-auto shrink-0 no-scrollbar">
                 <h2 className="text-2xl md:text-3xl font-black uppercase text-blue-900 shrink-0">Ruang Tunggu</h2>
                 
-                <div className="bg-sky-400 p-6 md:p-8 rounded-[2rem] border-b-8 border-sky-600 shadow-inner shrink-0">
+                <div className="bg-sky-400 p-6 md:p-8 rounded-[2rem] border-b-8 border-sky-600 shadow-inner shrink-0 relative group">
                   <p className="text-xs font-black uppercase tracking-widest text-white mb-1">Kode Ruangan:</p>
                   <p className="text-4xl md:text-6xl font-black text-white tracking-widest">{roomCode}</p>
+                  {isHost && (
+                    <button 
+                      onClick={handleCopyCode}
+                      className="mt-4 bg-white/20 hover:bg-white/30 transition-colors px-4 py-2 rounded-xl text-xs font-black text-white uppercase flex items-center gap-2 mx-auto"
+                    >
+                      {isCopied ? "Berhasil Disalin! ✓" : "Salin Kode 📋"}
+                    </button>
+                  )}
                 </div>
                 
                 <div className="flex flex-col gap-2 shrink-0">
@@ -820,13 +873,13 @@ export default function SambungCepat() {
                   placeholder={isMyTurn ? "KETIK DI SINI..." : "SABAR YA..."}
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && (playClickSound(), handleKirim())}
+                  onKeyDown={(e) => e.key === "Enter" && inputValue.trim() !== "" && (playClickSound(), handleKirim())}
                   className={`flex-1 w-full px-5 py-3 md:py-4 bg-sky-50/50 rounded-xl md:rounded-2xl text-lg md:text-xl font-black outline-none border-2 transition-all uppercase disabled:bg-slate-50 placeholder:text-slate-300 ${shouldShake ? 'animate-shake' : 'border-transparent focus:border-blue-400'}`}
                 />
                 <button 
-                  disabled={!isMyTurn}
+                  disabled={!isMyTurn || !inputValue.trim()}
                   onClick={() => { playClickSound(); handleKirim(); }}
-                  className={`w-full md:w-auto px-8 md:px-10 py-3 md:py-4 rounded-xl md:rounded-2xl font-black text-lg md:text-xl uppercase border-b-4 transition-all shadow-md shrink-0 ${isMyTurn ? 'bg-yellow-400 text-yellow-950 border-yellow-600 active:border-b-0 active:translate-y-1' : 'bg-slate-200 text-slate-400 border-slate-300'}`}
+                  className={`w-full md:w-auto px-8 md:px-10 py-3 md:py-4 rounded-xl md:rounded-2xl font-black text-lg md:text-xl uppercase border-b-4 transition-all shadow-md shrink-0 ${isMyTurn && inputValue.trim() !== "" ? 'bg-yellow-400 text-yellow-950 border-yellow-600 active:border-b-0 active:translate-y-1' : 'bg-slate-200 text-slate-400 border-slate-300 cursor-not-allowed'}`}
                 >
                   KIRIM!
                 </button>
