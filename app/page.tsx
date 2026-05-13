@@ -82,6 +82,12 @@ export default function SambungCepat() {
   const bgmRef = useRef<HTMLAudioElement | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const currentScreenRef = useRef<ScreenState>("HOME");
+
+  // Keep ref in sync
+  useEffect(() => {
+    currentScreenRef.current = currentScreen;
+  }, [currentScreen]);
 
   // 2. AUDIO FUNCTIONS
   const playClickSound = useCallback(() => {
@@ -139,7 +145,7 @@ export default function SambungCepat() {
     // =================================================================
 
     
-    if (!roomCode || !supabase || (currentScreen !== "ARENA" && currentScreen !== "LOBBY")) return;
+    if (!roomCode || !supabase) return;
 
     // Listen to changes in the Room table
     const channel = supabase
@@ -157,12 +163,12 @@ export default function SambungCepat() {
 
           // 1. Sinkronisasi Layar (Lobby -> Arena)
           // Jika status berubah jadi 'playing', semua pemain pindah ke Arena
-          if (updatedRoom.status === "playing" && currentScreen === "LOBBY") {
+          if (updatedRoom.status === "playing" && currentScreenRef.current === "LOBBY") {
             setCurrentScreen("ARENA");
           }
 
           // Safety Check: Hanya proses data jika sudah di Arena atau sedang transisi ke Arena
-          if (currentScreen !== "ARENA" && updatedRoom.status !== "playing") return;
+          if (currentScreenRef.current !== "ARENA" && updatedRoom.status !== "playing") return;
 
           // Fetch current players to calculate turn and score
           const { data: players } = await supabase
@@ -196,7 +202,7 @@ export default function SambungCepat() {
       supabase.removeChannel(channel);
     };
     // =================================================================
-  }, [supabase, roomCode, currentScreen, playerName, syncStateWithServer]);
+  }, [supabase, roomCode, playerName, syncStateWithServer]);
 
   // ERROR TRIGGER (SHAKE + WARNING)
   const triggerError = (msg: string) => {
@@ -216,6 +222,32 @@ export default function SambungCepat() {
   const handleMainLagi = () => {
     playClickSound();
     // Reset State Permainan
+    setRopePosition(0);
+    setMomentumOwner(null);
+    setCurrentPhrase("MEJA");
+    setUsedPhrases(["meja"]);
+    setStats({ totalCorrect: 0, totalTime: 0, turns: 0 });
+    setWinnerData(null);
+    setWarning("");
+    setInputValue("");
+    setTimeLeft(15);
+    setCurrentTurn("P1");
+    // Pindah ke Home
+    setCurrentScreen("HOME");
+  };
+
+  const handleExit = () => {
+    playClickSound();
+    // Unsubscribe from current room
+    if (channelRef.current) {
+      channelRef.current.unsubscribe();
+      channelRef.current = null;
+    }
+    // Reset Room & Connection states
+    setRoomCode("");
+    setIsHost(false);
+    setIsConnected(false);
+    // Reset Game States
     setRopePosition(0);
     setMomentumOwner(null);
     setCurrentPhrase("MEJA");
@@ -253,7 +285,7 @@ export default function SambungCepat() {
 
   // 6. SUPABASE CONNECTION EFFECT
   useEffect(() => {
-    if (!roomCode || currentScreen === "HOME" || !supabase) {
+    if (!roomCode || !supabase) {
       return;
     }
 
@@ -283,7 +315,7 @@ export default function SambungCepat() {
         const playerIds = Object.keys(state);
         
         // Jika sedang bermain dan ada yang disconnect
-        if (currentScreen === "ARENA" && playerIds.length < 2) {
+        if (currentScreenRef.current === "ARENA" && playerIds.length < 2) {
           setMomentumOwner(null);
           alert("Lawan terputus dari ruangan. Permainan dihentikan.");
           router.push("/");
@@ -291,7 +323,7 @@ export default function SambungCepat() {
       })
       .on("presence", { event: "leave" }, ({ leftPresences }) => {
         // Double check leave event
-        if (currentScreen === "ARENA") {
+        if (currentScreenRef.current === "ARENA") {
           setMomentumOwner(null);
           alert("Lawan terputus dari ruangan. Permainan dihentikan.");
           router.push("/");
@@ -312,7 +344,7 @@ export default function SambungCepat() {
       channel.unsubscribe();
       setIsConnected(false);
     };
-  }, [roomCode, currentScreen, playerName, router]);
+  }, [roomCode, playerName, router]);
 
   // 7. GAME LOGIC FUNCTIONS
   const handleStartGame = async () => {
@@ -412,7 +444,16 @@ export default function SambungCepat() {
       return;
     }
 
-    // 4. Validasi: Apakah kata ada di database Prisma?
+    // 4. Validasi: Huruf pertama input harus sama dengan huruf terakhir frasa saat ini
+    const lastChar = lowerCurrent.slice(-1);
+    const firstChar = lowerInput.charAt(0);
+
+    if (firstChar !== lastChar) {
+      triggerError(`Kata harus diawali dengan huruf '${lastChar.toUpperCase()}'!`);
+      return;
+    }
+
+    // 5. Validasi: Apakah kata ada di database Prisma?
     const checkRes = await fetch("/api/dictionary/check", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -424,52 +465,45 @@ export default function SambungCepat() {
       return;
     }
 
-    // 5. Validasi: Huruf pertama input harus sama dengan huruf terakhir frasa saat ini
-    const lastChar = lowerCurrent.slice(-1);
-    const firstChar = lowerInput.charAt(0);
+    // 6. Jika semua validasi lolos, proses pembaruan game
+    setWarning("");
+    playClickSound();
+    
+    const nextTurn: Turn = currentTurn === "P1" ? "P2" : "P1";
+    const moveDirection = currentTurn === "P1" ? -10 : 10;
+    const newPos = Math.max(-100, Math.min(100, ropePosition + moveDirection));
 
-    if (firstChar === lastChar) {
-      setWarning("");
-      playClickSound();
-      
-      const nextTurn: Turn = currentTurn === "P1" ? "P2" : "P1";
-      const moveDirection = currentTurn === "P1" ? -10 : 10;
-      const newPos = Math.max(-100, Math.min(100, ropePosition + moveDirection));
+    // SET MOMENTUM
+    setMomentumOwner(currentTurn);
 
-      // SET MOMENTUM
-      setMomentumOwner(currentTurn);
+    const timeUsed = 10 - timeLeft;
+    setStats(prev => ({
+      totalCorrect: prev.totalCorrect + 1,
+      totalTime: prev.totalTime + timeUsed,
+      turns: prev.turns + 1
+    }));
 
-      const timeUsed = 10 - timeLeft;
-      setStats(prev => ({
-        totalCorrect: prev.totalCorrect + 1,
-        totalTime: prev.totalTime + timeUsed,
-        turns: prev.turns + 1
-      }));
+    const newUsedPhrases = [...usedPhrases, lowerInput];
+    setUsedPhrases(newUsedPhrases);
 
-      const newUsedPhrases = [...usedPhrases, lowerInput];
-      setUsedPhrases(newUsedPhrases);
+    // 🔥 UPDATE KE BACKEND PRISMA
+    fetch("/api/rooms/play", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomCode, username: playerName, word: normalizedInput }),
+    }).catch(err => console.error("API Play Error:", err));
 
-      // 🔥 UPDATE KE BACKEND PRISMA
-      fetch("/api/rooms/play", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomCode, username: playerName, word: normalizedInput }),
-      }).catch(err => console.error("API Play Error:", err));
-
-      broadcastUpdate({
-        currentPhrase: normalizedInput,
-        ropePosition: newPos,
-        currentTurn: nextTurn,
-        momentumOwner: currentTurn, // Broadcast momentum
-        timeLeft: 15, // Reset to 15
-        usedPhrases: newUsedPhrases,
-      });
-      setTimeLeft(15);
-      setInputValue("");
-      checkWinner(newPos);
-    } else {
-      triggerError(`Huruf pertama harus "${lastChar.toUpperCase()}"!`);
-    }
+    broadcastUpdate({
+      currentPhrase: normalizedInput,
+      ropePosition: newPos,
+      currentTurn: nextTurn,
+      momentumOwner: currentTurn, // Broadcast momentum
+      timeLeft: 15, // Reset to 15
+      usedPhrases: newUsedPhrases,
+    });
+    setTimeLeft(15);
+    setInputValue("");
+    checkWinner(newPos);
   };
 
   // 8. CONTINUOUS MOMENTUM EFFECT
@@ -841,27 +875,15 @@ export default function SambungCepat() {
             {/* 3. BOTTOM PART: REFINED BADGE & INPUT (shrink-0) */}
             <footer className="w-full max-w-xl mx-auto flex flex-col items-center mt-auto shrink-0 pb-6 px-2 relative z-30">
               <AnimatePresence mode="wait">
-                {warning ? (
-                  <motion.div 
-                    key="warning"
-                    initial={{ y: 10, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    exit={{ y: -10, opacity: 0 }}
-                    className="py-1.5 px-6 rounded-full text-sm font-black uppercase tracking-widest shadow-md mb-3 z-10 border-b-2 bg-red-500 text-white border-red-700"
-                  >
-                    {warning}
-                  </motion.div>
-                ) : (
-                  <motion.div 
-                    key={isMyTurn ? "my-turn" : "waiting"}
-                    initial={{ y: 10, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    exit={{ y: -10, opacity: 0 }}
-                    className={`py-1.5 px-6 rounded-full text-sm font-black uppercase tracking-widest shadow-md mb-3 z-10 border-b-2 ${isMyTurn ? "bg-[#10b981] text-slate-900 border-green-700/30 animate-bounce" : "bg-white text-slate-400 border-slate-200"}`}
-                  >
-                    {isMyTurn ? "GILIRAN KAMU!" : "TUNGGU LAWAN..."}
-                  </motion.div>
-                )}
+                <motion.div 
+                  key={isMyTurn ? "my-turn" : "waiting"}
+                  initial={{ y: 10, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={{ y: -10, opacity: 0 }}
+                  className={`py-1.5 px-6 rounded-full text-sm font-black uppercase tracking-widest shadow-md mb-3 z-10 border-b-2 ${isMyTurn ? "bg-[#10b981] text-slate-900 border-green-700/30 animate-bounce" : "bg-white text-slate-400 border-slate-200"}`}
+                >
+                  {isMyTurn ? "GILIRAN KAMU!" : "TUNGGU LAWAN..."}
+                </motion.div>
               </AnimatePresence>
 
               <div className="w-full bg-white p-2 md:p-3 rounded-[2rem] md:rounded-[2.5rem] shadow-2xl flex flex-col md:flex-row items-center gap-2 md:gap-3 relative z-0 border-b-4 border-slate-200">
@@ -928,6 +950,13 @@ export default function SambungCepat() {
                   className="w-full bg-emerald-500 border-b-8 border-emerald-700 active:border-b-0 active:translate-y-2 text-white font-black py-4 md:py-5 rounded-2xl md:rounded-3xl text-xl md:text-2xl uppercase shadow-lg shrink-0"
                 >
                   Main Lagi!
+                </button>
+
+                <button 
+                  onClick={handleExit}
+                  className="w-full bg-slate-400 border-b-8 border-slate-600 active:border-b-0 active:translate-y-2 text-white font-black py-4 md:py-5 rounded-2xl md:rounded-3xl text-xl md:text-2xl uppercase shadow-lg shrink-0"
+                >
+                  Keluar
                 </button>
               </div>
             </div>
